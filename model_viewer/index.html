@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Avatar Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; }
+    #model-panel {
+      position: absolute; top: 16px; left: 16px;
+      display: flex; flex-direction: column; gap: 10px; min-width: 200px;
+    }
+    #model-panel h3 { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+    #model-panel .group { display: flex; flex-direction: column; gap: 4px; }
+    #model-panel button {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #ccc; padding: 7px 12px; border-radius: 6px; cursor: pointer;
+      font: 13px system-ui, sans-serif; text-align: left; transition: all 0.15s;
+    }
+    #model-panel button:hover { background: rgba(255,255,255,0.12); }
+    #model-panel button.active { background: rgba(100,120,255,0.25); border-color: #7888ff; color: #fff; }
+    #anim-panel {
+      position: absolute; top: 16px; right: 16px;
+      display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+    }
+    #anim-panel h3 { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+    #anim-panel button {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #ccc; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+      font: 13px system-ui, sans-serif; text-align: right; transition: all 0.15s; width: 100%;
+    }
+    #anim-panel button:hover { background: rgba(255,255,255,0.12); }
+    #anim-panel button.active { background: rgba(100,120,255,0.25); border-color: #7888ff; color: #fff; }
+    #skeleton-toggle {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #ccc; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+      font: 13px system-ui, sans-serif; transition: all 0.15s; width: 100%;
+    }
+    #skeleton-toggle:hover { background: rgba(255,255,255,0.12); }
+    #skeleton-toggle.active { background: rgba(100,120,255,0.25); border-color: #7888ff; color: #fff; }
+    #info {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      color: #666; font-size: 12px; text-align: center;
+      pointer-events: none; user-select: none;
+    }
+    #loading {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      color: #7888ff; font-size: 14px; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="model-panel"></div>
+  <div id="anim-panel"></div>
+  <div id="loading">Loading model…</div>
+  <div id="info">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+    const MODELS = [
+      { group: 'v01', label: 'v01 · Static',        path: '../models/v01/model.glb' },
+      { group: 'v01', label: 'v01 · Rigged',         path: '../models/v01/model_rigged.glb' },
+      { group: 'v01', label: 'v01 · Uncompressed',   path: '../models/v01/model_uncompressed.glb' },
+      { group: 'v02', label: 'v02 · Rigged',         path: '../models/v02/model_rigged.glb' },
+      { group: 'v02', label: 'v02 · Uncompressed',   path: '../models/v02/model_uncompressed.glb' },
+    ];
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 100);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const key = new THREE.DirectionalLight(0xffffff, 1.5);
+    key.position.set(3, 5, 4);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x8888ff, 0.5);
+    fill.position.set(-3, 2, -2);
+    scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.4);
+    rim.position.set(0, 3, -5);
+    scene.add(rim);
+
+    const grid = new THREE.GridHelper(10, 20, 0x333355, 0x222244);
+    scene.add(grid);
+
+    const clock = new THREE.Clock();
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+
+    let currentModel = null;
+    let mixer = null;
+    let currentAction = null;
+    let skeletonHelper = null;
+
+    function clearModel() {
+      if (skeletonHelper) { scene.remove(skeletonHelper); skeletonHelper = null; }
+      if (mixer) { mixer.stopAllAction(); mixer = null; }
+      if (currentModel) { scene.remove(currentModel); currentModel = null; }
+      currentAction = null;
+      const animPanel = document.getElementById('anim-panel');
+      animPanel.innerHTML = '';
+    }
+
+    function loadModel(path) {
+      clearModel();
+      const loadingEl = document.getElementById('loading');
+      loadingEl.style.display = 'block';
+
+      loader.load(path, (gltf) => {
+        loadingEl.style.display = 'none';
+        currentModel = gltf.scene;
+        scene.add(currentModel);
+
+        // Auto-center and fit
+        const box = new THREE.Box3().setFromObject(currentModel);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+
+        currentModel.position.sub(center);
+        currentModel.position.y += size.y / 2;
+
+        controls.target.set(0, size.y / 2, 0);
+        camera.position.set(0, size.y / 2, maxDim * 2);
+        controls.update();
+
+        // Skeleton
+        currentModel.traverse((child) => {
+          if (child.isSkinnedMesh && !skeletonHelper) {
+            skeletonHelper = new THREE.SkeletonHelper(currentModel);
+            skeletonHelper.visible = document.getElementById('skeleton-toggle')?.classList.contains('active') || false;
+            scene.add(skeletonHelper);
+          }
+        });
+
+        // Animations
+        const animPanel = document.getElementById('anim-panel');
+        animPanel.innerHTML = '';
+
+        if (skeletonHelper) {
+          const skelBtn = document.createElement('button');
+          skelBtn.id = 'skeleton-toggle';
+          skelBtn.textContent = '☠ Skeleton';
+          skelBtn.addEventListener('click', () => {
+            if (skeletonHelper) {
+              skeletonHelper.visible = !skeletonHelper.visible;
+              skelBtn.classList.toggle('active', skeletonHelper.visible);
+            }
+          });
+          animPanel.appendChild(skelBtn);
+        }
+
+        if (gltf.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(currentModel);
+
+          const heading = document.createElement('h3');
+          heading.textContent = 'Animations';
+          animPanel.appendChild(heading);
+
+          gltf.animations.forEach((clip, i) => {
+            const btn = document.createElement('button');
+            btn.textContent = `▶ ${clip.name || `Animation ${i + 1}`}`;
+            btn.addEventListener('click', () => {
+              animPanel.querySelectorAll('button:not(#skeleton-toggle)').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              if (currentAction) currentAction.fadeOut(0.3);
+              currentAction = mixer.clipAction(clip);
+              currentAction.reset().fadeIn(0.3).play();
+            });
+            animPanel.appendChild(btn);
+          });
+
+          // Auto-play first
+          animPanel.querySelector('button:not(#skeleton-toggle)')?.click();
+        } else if (skeletonHelper) {
+          const note = document.createElement('h3');
+          note.textContent = 'No animations';
+          animPanel.appendChild(note);
+        }
+      });
+    }
+
+    // Build model selector panel
+    const modelPanel = document.getElementById('model-panel');
+    let lastGroup = '';
+    MODELS.forEach((m, i) => {
+      if (m.group !== lastGroup) {
+        lastGroup = m.group;
+        const h = document.createElement('h3');
+        h.textContent = m.group;
+        modelPanel.appendChild(h);
+      }
+      const btn = document.createElement('button');
+      btn.textContent = m.label;
+      btn.dataset.index = i;
+      btn.addEventListener('click', () => {
+        modelPanel.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadModel(m.path);
+      });
+      modelPanel.appendChild(btn);
+    });
+
+    // Load v02 rigged by default
+    const defaultIdx = MODELS.findIndex(m => m.group === 'v02' && m.label.includes('Rigged'));
+    modelPanel.querySelectorAll('button')[defaultIdx >= 0 ? defaultIdx : 0].click();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      if (mixer) mixer.update(delta);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

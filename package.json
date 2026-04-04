@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "viewer": "npx serve . -l 3000 --no-clipboard",
+    "viewer:open": "npx serve . -l 3000 --no-clipboard -o model_viewer/"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/extensions": "^4.3.0",
+    "@playwright/mcp": "^0.0.70",
+    "meshoptimizer": "^1.1.0",
+    "playwright": "^1.60.0-alpha-1774999321000",
+    "serve": "^14.2.6"
+  }
+}

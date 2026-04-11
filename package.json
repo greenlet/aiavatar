@@ -1,14 +1,21 @@
 {
   "scripts": {
-    "viewer": "npx serve . -l 3000 --no-clipboard",
-    "viewer:open": "npx serve . -l 3000 --no-clipboard -o model_viewer/"
+    "dev": "vite",
+    "build": "vite build"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.3.0",
     "@gltf-transform/extensions": "^4.3.0",
     "@playwright/mcp": "^0.0.70",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@vitejs/plugin-react": "^6.0.1",
     "meshoptimizer": "^1.1.0",
     "playwright": "^1.60.0-alpha-1774999321000",
-    "serve": "^14.2.6"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "serve": "^14.2.6",
+    "three": "^0.183.2",
+    "vite": "^8.0.5"
   }
 }

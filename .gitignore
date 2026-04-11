@@ -373,3 +373,8 @@ vite.config.ts.timestamp-*
 .vite/
 
 
+*.zip
+*.fbx
+screenshots/
+.DS_Store
+

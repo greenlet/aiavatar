@@ -6,9 +6,10 @@ import AnimationPanel from './AnimationPanel';
 import BlendShapePanel from './BlendShapePanel';
 
 const MODELS = [
-  { name: 'Jake (v03)', url: '/v03/model.glb' },
-  { name: 'Frank (v04)', url: '/v04/model.glb' },
-  { name: 'Pete (v05)', url: '/v05/model.glb' },
+  { name: 'Jake (v03)', url: '/v03/model.glb', scale: 1 },
+  { name: 'Frank (v04)', url: '/v04/model.glb', scale: 15 },
+  { name: 'Pete (v05)', url: '/v05/model.glb', scale: 0.01 },
+  { name: 'Brunette (v06)', url: '/v06/model.glb', scale: 1 },
 ];
 
 const ANIMATIONS = [
@@ -81,7 +82,7 @@ export default function App() {
       {/* 3D viewport */}
       <div style={{ flex: 1, position: 'relative' }}>
         <Canvas
-          camera={{ position: [0, 90, 250], fov: 45 }}
+          camera={{ position: [0, 1, 3], fov: 45 }}
           shadows
           style={{ background: '#1a1a2e' }}
         >
@@ -91,6 +92,7 @@ export default function App() {
           <Suspense fallback={null}>
             <ModelViewer
               modelUrl={MODELS[selectedModel].url}
+              modelScale={MODELS[selectedModel].scale}
               animationUrl={selectedAnim >= 0 ? ANIMATIONS[selectedAnim].url : null}
               blendShapes={blendShapes}
               onShapesDetected={setAvailableShapes}
@@ -99,8 +101,8 @@ export default function App() {
               showSkeleton={showSkeleton}
             />
           </Suspense>
-          <OrbitControls target={[0, 90, 0]} />
-          <gridHelper args={[500, 50, '#444', '#333']} />
+          <OrbitControls target={[0, 1, 0]} />
+          <gridHelper args={[10, 10, '#444', '#333']} />
         </Canvas>
       </div>
     </div>

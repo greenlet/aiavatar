@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 
 const CATEGORIES = {
-  Brow: (n) => n.startsWith('Brow_'),
-  Eye: (n) => n.startsWith('Eye_'),
-  Cheek: (n) => n.startsWith('Cheek_'),
-  Nose: (n) => n.startsWith('Nose_'),
-  Mouth: (n) => n.startsWith('Mouth_'),
-  Tongue: (n) => n.startsWith('Tongue_'),
+  Brow: (n) => n.startsWith('Brow_') || n.startsWith('brow'),
+  Eye: (n) => n.startsWith('Eye_') || n.startsWith('eye'),
+  Cheek: (n) => n.startsWith('Cheek_') || n.startsWith('cheek'),
+  Nose: (n) => n.startsWith('Nose_') || n.startsWith('nose'),
+  Jaw: (n) => n.startsWith('jaw'),
+  Mouth: (n) => n.startsWith('Mouth_') || n.startsWith('mouth'),
+  Tongue: (n) => n.startsWith('Tongue_') || n.startsWith('tongue'),
   Viseme: (n) => ['Affricate', 'Dental_Lip', 'Explosive', 'Lip_Open', 'Open', 'Tight', 'Tight_O', 'Wide'].includes(n),
   Other: () => true,
 };

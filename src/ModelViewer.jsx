@@ -26,6 +26,7 @@ function AnimationLoader({ url, boneMap, targetRestPoses, isMixamoModel, onLoade
 
 function ModelScene({
   modelUrl,
+  modelScale,
   animationUrl,
   blendShapes,
   onShapesDetected,
@@ -39,6 +40,9 @@ function ModelScene({
 
   // Clone scene so each model gets its own instance
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+
+  // Per-model scale to normalize to metres
+  const scaleToReference = modelScale || 1;
 
   // Build bone map from cloned scene for animation retargeting
   const { boneMap, targetRestPoses, isMixamoModel } = useMemo(() => buildBoneMap(clonedScene), [clonedScene]);
@@ -115,8 +119,10 @@ function ModelScene({
 
   return (
     <>
-      <primitive ref={group} object={clonedScene} />
-      <primitive object={skeletonHelper} />
+      <group scale={scaleToReference}>
+        <primitive ref={group} object={clonedScene} />
+        <primitive object={skeletonHelper} />
+      </group>
       {animationUrl && (
         <Suspense fallback={null}>
           <AnimationLoader url={animationUrl} boneMap={boneMap} targetRestPoses={targetRestPoses} isMixamoModel={isMixamoModel} onLoaded={setExternalClips} />

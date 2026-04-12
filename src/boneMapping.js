@@ -133,6 +133,19 @@ export function buildBoneMap(scene) {
     }
   }
 
+  // If the model uses bare Mixamo bone names without any prefix
+  // (e.g. "Hips" instead of "mixamorigHips"), add canonical mappings.
+  if (!mixamoPrefix && baseToActual['Hips'] && !baseToActual['mixamorigHips']) {
+    for (const suffix of MIXAMO_SUFFIXES) {
+      const canonical = 'mixamorig' + suffix;   // e.g. mixamorigHips
+      const bare = suffix;                       // e.g. Hips
+      if (baseToActual[bare] && !baseToActual[canonical]) {
+        baseToActual[canonical] = baseToActual[bare];
+        targetRestPoses[canonical] = targetRestPoses[bare];
+      }
+    }
+  }
+
   return { boneMap: baseToActual, targetRestPoses, isMixamoModel };
 }
 
@@ -187,8 +200,7 @@ export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, is
       actualBone = boneMap[mixamoBone];
       restKey = mixamoBone;
       isHip = /Hips$/.test(mixamoBone);
-      // For Mixamo→CC_Base models that happen to have a mixamorig bone in the map,
-      // this shouldn't trigger since CC_Base models won't have mixamorig* bones.
+      dropPosition = isHip;
     }
 
     // Path B: Mixamo → CC_Base mapping
@@ -198,7 +210,7 @@ export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, is
         actualBone = boneMap[ccBase];
         restKey = ccBase;
         isHip = ccBase === 'CC_Base_Hip';
-        dropPosition = isHip; // drop hip position for CC_Base models
+        dropPosition = isHip;
       }
     }
 
@@ -210,7 +222,9 @@ export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, is
 
     track.name = actualBone + property;
 
-    // Drop hip position for CC_Base models (coordinate frame mismatch)
+    // Drop hip position track — animation and model may use different
+    // unit scales (e.g. metres vs centimetres), and the external scale
+    // group already positions the model correctly.
     if (dropPosition && property === '.position') {
       continue;
     }

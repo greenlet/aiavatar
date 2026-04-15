@@ -45,7 +45,7 @@ function ModelScene({
   const scaleToReference = modelScale || 1;
 
   // Build bone map from cloned scene for animation retargeting
-  const { boneMap, targetRestPoses, isMixamoModel } = useMemo(() => buildBoneMap(clonedScene), [clonedScene]);
+  const { boneMap, targetRestPoses, targetWorldPoses, targetParentWorldPoses, isMixamoModel, isBareNameMixamo } = useMemo(() => buildBoneMap(clonedScene), [clonedScene]);
 
   // Clear external clips when no animation selected
   useEffect(() => {
@@ -125,7 +125,7 @@ function ModelScene({
       </group>
       {animationUrl && (
         <Suspense fallback={null}>
-          <AnimationLoader url={animationUrl} boneMap={boneMap} targetRestPoses={targetRestPoses} isMixamoModel={isMixamoModel} onLoaded={setExternalClips} />
+          <AnimationLoader url={animationUrl} boneMap={boneMap} targetRestPoses={targetRestPoses} targetWorldPoses={targetWorldPoses} targetParentWorldPoses={targetParentWorldPoses} isMixamoModel={isMixamoModel} isBareNameMixamo={isBareNameMixamo} onLoaded={setExternalClips} />
         </Suspense>
       )}
     </>

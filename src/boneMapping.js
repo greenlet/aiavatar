@@ -88,6 +88,10 @@ const MIXAMO_SUFFIXES = Object.keys(MIXAMO_TO_CC_BASE).map(k => k.replace('mixam
 export function buildBoneMap(scene) {
   const baseToActual = {};
   const targetRestPoses = {};
+  const targetWorldPoses = {};
+  const targetParentWorldPoses = {};
+
+  scene.updateWorldMatrix(true, true);
 
   // Detect Mixamo prefix variant (e.g. "mixamorig9" vs "mixamorig")
   let mixamoPrefix = null;
@@ -99,7 +103,14 @@ export function buildBoneMap(scene) {
 
   scene.traverse((child) => {
     if (!child.isBone) return;
+    child.updateWorldMatrix(true, false);
     const name = child.name;
+
+    const wq = new Quaternion();
+    child.getWorldQuaternion(wq);
+    const pwq = new Quaternion();
+    if (child.parent) child.parent.getWorldQuaternion(pwq);
+
     // Strip trailing _0XX suffix added by Sketchfab
     const match = name.match(/^(.+?)_0(\d*)$/);
     if (match) {
@@ -107,6 +118,8 @@ export function buildBoneMap(scene) {
       if (!baseToActual[base]) {
         baseToActual[base] = name;
         targetRestPoses[base] = child.quaternion.clone();
+        targetWorldPoses[base] = wq.clone();
+        targetParentWorldPoses[base] = pwq.clone();
       }
     }
     // Exact match (for bone names without suffix)
@@ -114,6 +127,8 @@ export function buildBoneMap(scene) {
       baseToActual[name] = name;
       if (!targetRestPoses[name]) {
         targetRestPoses[name] = child.quaternion.clone();
+        targetWorldPoses[name] = wq.clone();
+        targetParentWorldPoses[name] = pwq.clone();
       }
     }
   });
@@ -129,54 +144,67 @@ export function buildBoneMap(scene) {
       if (baseToActual[variant] && !baseToActual[canonical]) {
         baseToActual[canonical] = baseToActual[variant];
         targetRestPoses[canonical] = targetRestPoses[variant];
+        targetWorldPoses[canonical] = targetWorldPoses[variant];
+        targetParentWorldPoses[canonical] = targetParentWorldPoses[variant];
       }
     }
   }
 
   // If the model uses bare Mixamo bone names without any prefix
   // (e.g. "Hips" instead of "mixamorigHips"), add canonical mappings.
-  if (!mixamoPrefix && baseToActual['Hips'] && !baseToActual['mixamorigHips']) {
+  // These models (e.g. Ready Player Me) are designed to play Mixamo
+  // animations directly with name remapping only — no quaternion
+  // retargeting needed.
+  const isBareNameMixamo = !mixamoPrefix && !!baseToActual['Hips'] && !baseToActual['mixamorigHips'];
+  if (isBareNameMixamo) {
     for (const suffix of MIXAMO_SUFFIXES) {
       const canonical = 'mixamorig' + suffix;   // e.g. mixamorigHips
       const bare = suffix;                       // e.g. Hips
       if (baseToActual[bare] && !baseToActual[canonical]) {
         baseToActual[canonical] = baseToActual[bare];
         targetRestPoses[canonical] = targetRestPoses[bare];
+        targetWorldPoses[canonical] = targetWorldPoses[bare];
+        targetParentWorldPoses[canonical] = targetParentWorldPoses[bare];
       }
     }
   }
 
-  return { boneMap: baseToActual, targetRestPoses, isMixamoModel };
+  return { boneMap: baseToActual, targetRestPoses, targetWorldPoses, targetParentWorldPoses, isMixamoModel, isBareNameMixamo };
 }
 
 /**
- * Extract rest-pose quaternions for every bone in a Mixamo animation scene.
- * Three.js strips colons, so mixamorig:Hips -> mixamorigHips.
+ * Extract rest-pose local and world quaternions for every bone in a Mixamo animation scene.
  */
 export function buildSourceRestPoses(scene) {
   const poses = {};
+  const worldPoses = {};
+  scene.updateWorldMatrix(true, true);
   scene.traverse((child) => {
     if (child.isBone) {
+      child.updateWorldMatrix(true, false);
       poses[child.name] = child.quaternion.clone();
+      const wq = new Quaternion();
+      child.getWorldQuaternion(wq);
+      worldPoses[child.name] = wq;
     }
   });
-  return poses;
+  return { poses, worldPoses };
 }
 
 /**
  * Retarget a Three.js AnimationClip from Mixamo bones to actual scene bones.
  *
- * Supports two paths:
- *  A) Mixamo → Mixamo: direct bone name lookup (handles variant prefixes).
- *     Keeps hip position track since coordinate frames match.
- *  B) Mixamo → CC_Base: uses MIXAMO_TO_CC_BASE rename table.
- *     Drops hip position track (Y-up metres vs Z-up cm mismatch).
+ * Uses world-space delta retargeting: extracts rotation delta in world space,
+ * then re-expresses it in the target skeleton's local space.
+ * This handles different rest poses and parent orientations
+ * (e.g. A-pose RPM vs T-pose Mixamo).
  *
- * Quaternion correction for both paths:
- *   Hip:    Q_result = Q_tgt_rest * Q_src_rest^-1 * Q_anim
- *   Others: Q_result = Q_anim * Q_src_rest^-1 * Q_tgt_rest
+ * CC_Base models (v03/v04) are not directly compatible with Mixamo animations.
+ * They need to be re-rigged through Mixamo first.
  */
-export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, isMixamoModel) {
+export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses,
+  isMixamoModel, isBareNameMixamo, targetWorldPoses, targetParentWorldPoses,
+  sourceWorldPoses) {
   const retargeted = clip.clone();
   const tracksToKeep = [];
 
@@ -191,11 +219,11 @@ export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, is
 
     // --- Resolve target bone name ---
     let actualBone = null;
-    let restKey = null;       // key into targetRestPoses
+    let restKey = null;
     let isHip = false;
-    let dropPosition = false; // whether to drop the .position track for the hip
+    let dropPosition = false;
 
-    // Path A: direct Mixamo lookup (works for both standard and variant prefixes)
+    // Path A: direct Mixamo lookup
     if (boneMap[mixamoBone]) {
       actualBone = boneMap[mixamoBone];
       restKey = mixamoBone;
@@ -215,50 +243,54 @@ export function retargetClip(clip, boneMap, targetRestPoses, sourceRestPoses, is
     }
 
     if (!actualBone) {
-      // Unknown bone — keep track as-is (might be a non-mapped bone)
       tracksToKeep.push(track);
       continue;
     }
 
     track.name = actualBone + property;
 
-    // Drop hip position track — animation and model may use different
-    // unit scales (e.g. metres vs centimetres), and the external scale
-    // group already positions the model correctly.
+    // Drop hip position track
     if (dropPosition && property === '.position') {
       continue;
     }
 
-    // Apply rest-pose quaternion correction for rotation tracks
-    if (property === '.quaternion') {
-      const srcQ = sourceRestPoses[mixamoBone];
-      const tgtQ = targetRestPoses[restKey];
-      if (srcQ && tgtQ) {
-        const srcInv = srcQ.clone().invert();
+    // Apply quaternion retargeting using world-space delta approach.
+    // For each keyframe:
+    //   1. Compute world rotation from animation: Q_src_world = Q_src_parent_world * Q_anim
+    //   2. Compute world delta from rest: Q_delta = Q_src_world_rest^-1 * Q_src_world
+    //   3. Apply delta in target world: Q_tgt_world = Q_tgt_world_rest * Q_delta
+    //   4. Convert back to local: Q_result = Q_tgt_parent_world^-1 * Q_tgt_world
+    if (property === '.quaternion' && sourceWorldPoses && targetWorldPoses && targetParentWorldPoses) {
+      const srcWorldRest = sourceWorldPoses[mixamoBone];
+      const tgtWorldRest = targetWorldPoses[restKey];
+      const tgtParentWorld = targetParentWorldPoses[restKey];
+
+      if (srcWorldRest && tgtWorldRest && tgtParentWorld) {
+        const srcWorldRestInv = srcWorldRest.clone().invert();
+        const tgtParentWorldInv = tgtParentWorld.clone().invert();
+
+        // Source parent world = srcWorldRest * srcLocalRest^-1
+        const srcLocalRest = sourceRestPoses[mixamoBone];
+        const srcLocalRestInv = srcLocalRest ? srcLocalRest.clone().invert() : new Quaternion();
+        const srcParentWorld = srcWorldRest.clone().multiply(srcLocalRestInv);
+
         const values = track.values;
         const q = new Quaternion();
-        if (isHip) {
-          // Pre-multiply: Q_result = Q_tgt * Q_src^-1 * Q_anim
-          for (let i = 0; i < values.length; i += 4) {
-            q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
-            q.premultiply(srcInv);
-            q.premultiply(tgtQ);
-            values[i] = q.x;
-            values[i + 1] = q.y;
-            values[i + 2] = q.z;
-            values[i + 3] = q.w;
-          }
-        } else {
-          // Post-multiply: Q_result = Q_anim * Q_src^-1 * Q_tgt
-          for (let i = 0; i < values.length; i += 4) {
-            q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
-            q.multiply(srcInv);
-            q.multiply(tgtQ);
-            values[i] = q.x;
-            values[i + 1] = q.y;
-            values[i + 2] = q.z;
-            values[i + 3] = q.w;
-          }
+        for (let i = 0; i < values.length; i += 4) {
+          q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
+          // Q_src_world = Q_src_parent_world * Q_anim_local
+          const srcWorld = srcParentWorld.clone().multiply(q);
+          // Q_world_delta = Q_src_world_rest^-1 * Q_src_world
+          const worldDelta = srcWorldRestInv.clone().multiply(srcWorld);
+          // Q_tgt_world = Q_tgt_world_rest * Q_world_delta
+          const tgtWorld = tgtWorldRest.clone().multiply(worldDelta);
+          // Q_result_local = Q_tgt_parent_world^-1 * Q_tgt_world
+          q.copy(tgtParentWorldInv).multiply(tgtWorld);
+
+          values[i] = q.x;
+          values[i + 1] = q.y;
+          values[i + 2] = q.z;
+          values[i + 3] = q.w;
         }
       }
     }

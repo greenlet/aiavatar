@@ -1,9 +1,10 @@
-import React, { useState, Suspense } from 'react';
+import React, { useState, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import ModelViewer from './ModelViewer';
 import AnimationPanel from './AnimationPanel';
 import BlendShapePanel from './BlendShapePanel';
+import { useLipSync } from './useLipSync';
 
 const MODELS = [
   { name: 'Jake (v03)', url: '/v03/model.glb', scale: 1 },
@@ -29,6 +30,12 @@ export default function App() {
   const [animationNames, setAnimationNames] = useState([]);
   const [playingBuiltIn, setPlayingBuiltIn] = useState(null);
   const [showSkeleton, setShowSkeleton] = useState(false);
+  const { micActive, toggleMic, visemeValues } = useLipSync();
+
+  // Merge manual blendshape sliders with real-time lip-sync visemes
+  const mergedBlendShapes = useMemo(() => {
+    return { ...blendShapes, ...visemeValues };
+  }, [blendShapes, visemeValues]);
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
@@ -58,6 +65,17 @@ export default function App() {
             style={showSkeleton ? btnActiveStyle : btnStyle}
           >
             {showSkeleton ? '🦴 Hide Skeleton' : '🦴 Show Skeleton'}
+          </button>
+        </div>
+
+        {/* Lip-sync mic toggle */}
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Lip Sync</label>
+          <button
+            onClick={toggleMic}
+            style={micActive ? btnActiveStyle : btnStyle}
+          >
+            {micActive ? '🎤 Mic On' : '🎤 Enable Mic'}
           </button>
         </div>
 
@@ -94,7 +112,7 @@ export default function App() {
               modelUrl={MODELS[selectedModel].url}
               modelScale={MODELS[selectedModel].scale}
               animationUrl={selectedAnim >= 0 ? ANIMATIONS[selectedAnim].url : null}
-              blendShapes={blendShapes}
+              blendShapes={mergedBlendShapes}
               onShapesDetected={setAvailableShapes}
               onAnimationsDetected={setAnimationNames}
               playingBuiltIn={playingBuiltIn}

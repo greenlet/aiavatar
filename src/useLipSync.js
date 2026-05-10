@@ -14,8 +14,6 @@ export function useLipSync() {
   const sourceRef = useRef(null);
   const rafRef = useRef(null);
   const lastTimeRef = useRef(0);
-  // Smoothed values to reduce flickering
-  const smoothedRef = useRef({});
 
   const cleanup = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -32,7 +30,6 @@ export function useLipSync() {
     headaudioRef.current = null;
     streamRef.current = null;
     sourceRef.current = null;
-    smoothedRef.current = {};
     setVisemeValues({});
   }, []);
 
@@ -75,15 +72,8 @@ export function useLipSync() {
       });
       headaudioRef.current = headaudio;
 
-      // Tune viseme max values: balanced vertical/horizontal/narrow
-      headaudio.visemeMaxs = [
-        0.8, 0.75, 0.85, 0.8, 0.9,    // aa, E, I, O, U (U=narrow pucker)
-        0.9, 0.85, 0.75, 0.75, 0.9,   // PP, SS, TH, DD, FF (PP,FF=narrow)
-        0.75, 0.75, 0.75, 0.85, 0.4   // kk, nn, RR, CH, sil
-      ];
-
-      // Use gentler sigmoid for smoother transitions
-      headaudio.easing = headaudio.sigmoidFactory(3);
+      // Use library defaults for visemeMaxs (0.65 general, 0.75 for bilabials/labiodentals)
+      // and default sigmoid(5) easing — no overrides needed
 
       // 6. Load the pre-trained English viseme model
       const modelUrl = new URL(
@@ -103,12 +93,8 @@ export function useLipSync() {
         rawValues[name] = value;
       };
 
-      // 9. Animation loop: call headaudio.update, apply smoothing,
-      //    then push to React state
-      const SMOOTH_UP = 0.25;   // attack: how fast visemes rise (0-1, lower = smoother)
-      const SMOOTH_DOWN = 0.12; // decay: how fast visemes fall (0-1, lower = smoother)
-      const smoothed = smoothedRef.current;
-
+      // 9. Animation loop: call headaudio.update (which handles easing internally),
+      //    then derive jaw/mouth helpers and push to React state
       const tick = (time) => {
         const dt = time - lastTimeRef.current;
         lastTimeRef.current = time;
@@ -117,26 +103,17 @@ export function useLipSync() {
           headaudioRef.current.update(dt);
         }
 
-        // Exponential smoothing on raw values
-        const output = {};
-        for (const [key, target] of Object.entries(rawValues)) {
-          const prev = smoothed[key] || 0;
-          const alpha = target > prev ? SMOOTH_UP : SMOOTH_DOWN;
-          const val = prev + alpha * (target - prev);
-          smoothed[key] = val;
-          output[key] = val;
-        }
+        // Use values directly from HeadAudio (already eased by sigmoid)
+        const output = { ...rawValues };
 
-        // Drive jawOpen proportional to open-mouth visemes only, with a lower cap
+        // Drive jawOpen proportional to open-mouth visemes only
         const openVisemes = ['viseme_aa', 'viseme_O', 'viseme_E', 'viseme_DD'];
         const narrowVisemes = ['viseme_I', 'viseme_U', 'viseme_PP', 'viseme_FF', 'viseme_SS', 'viseme_CH'];
         const openVal = Math.max(...openVisemes.map(k => output[k] || 0), 0);
         const narrowVal = Math.max(...narrowVisemes.map(k => output[k] || 0), 0);
         output['jawOpen'] = openVal * 0.4 + narrowVal * 0.1;
         output['mouthOpen'] = openVal * 0.25;
-        // Add mouthPucker for narrow sounds (U, PP, FF)
         output['mouthPucker'] = (output['viseme_U'] || 0) * 0.5 + (output['viseme_PP'] || 0) * 0.3 + (output['viseme_FF'] || 0) * 0.3;
-        // Add mouthFunnel for O
         output['mouthFunnel'] = (output['viseme_O'] || 0) * 0.4;
 
         setVisemeValues({ ...output });

@@ -4,7 +4,11 @@ import { OrbitControls } from '@react-three/drei';
 import ModelViewer from './ModelViewer';
 import AnimationPanel from './AnimationPanel';
 import BlendShapePanel from './BlendShapePanel';
+import ChatPanel from './ChatPanel';
 import { useLipSync } from './useLipSync';
+import { useTtsLipSync } from './useTtsLipSync';
+import { useGestureController } from './avatar/useGestureController';
+import { ANIMATIONS, ANIMATION_LABELS } from './animations';
 
 const MODELS = [
   { name: 'Jake (v03)', url: '/v03/model.glb', scale: 1 },
@@ -13,37 +17,42 @@ const MODELS = [
   { name: 'Brunette (v06)', url: '/v06/model.glb', scale: 1 },
 ];
 
-const ANIMATIONS = [
-  { name: 'Greeting', url: '/animations/greeting.glb' },
-  { name: 'Standing Idle', url: '/animations/standing_idle.glb' },
-  { name: 'Talking Funny', url: '/animations/talking_funny.glb' },
-  { name: 'Talking Seated', url: '/animations/talking_seated.glb' },
-  { name: 'Thinking', url: '/animations/thinking.glb' },
-  { name: 'Waving', url: '/animations/waving.glb' },
-];
+// Manual animation-picker entries (uses pretty labels from animations.js).
+const ANIMATION_PICKER = ANIMATIONS.map((a) => ({
+  name: ANIMATION_LABELS[a.name] || a.name,
+  url: a.url,
+}));
 
 export default function App() {
-  const [selectedModel, setSelectedModel] = useState(0);
+  const [selectedModel, setSelectedModel] = useState(3); // Brunette (v06) — has Oculus visemes
   const [selectedAnim, setSelectedAnim] = useState(-1);
   const [blendShapes, setBlendShapes] = useState({});
   const [availableShapes, setAvailableShapes] = useState([]);
   const [animationNames, setAnimationNames] = useState([]);
   const [playingBuiltIn, setPlayingBuiltIn] = useState(null);
   const [showSkeleton, setShowSkeleton] = useState(false);
-  const { micActive, toggleMic, visemeValues } = useLipSync();
+  const [chatGesturesEnabled, setChatGesturesEnabled] = useState(true);
 
-  // Merge manual blendshape sliders with real-time lip-sync visemes
+  const { micActive, toggleMic, visemeValues: micVisemes } = useLipSync();
+  const tts = useTtsLipSync({ voice: 'en-US-JennyNeural' });
+  const gesture = useGestureController({ enabled: chatGesturesEnabled });
+
+  // While TTS is speaking, its visemes take precedence over mic-driven ones.
   const mergedBlendShapes = useMemo(() => {
-    return { ...blendShapes, ...visemeValues };
-  }, [blendShapes, visemeValues]);
+    const baseVisemes = tts.speaking ? tts.visemeValues : micVisemes;
+    return { ...blendShapes, ...baseVisemes };
+  }, [blendShapes, micVisemes, tts.speaking, tts.visemeValues]);
+
+  // Manual animation picker overrides chat-driven gestures while selected.
+  const manualAnim = selectedAnim >= 0 ? ANIMATION_PICKER[selectedAnim] : null;
+  const activeAnimationUrl = manualAnim ? manualAnim.url : gesture.gestureUrl;
+  const activeLoopOnce = manualAnim ? false : gesture.gestureLoopOnce;
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-      {/* Left sidebar */}
       <div style={sidebarStyle}>
-        <h2 style={{ fontSize: 16, marginBottom: 12 }}>Model Viewer</h2>
+        <h2 style={{ fontSize: 16, marginBottom: 12 }}>AI Avatar</h2>
 
-        {/* Model selector */}
         <div style={sectionStyle}>
           <label style={labelStyle}>Character</label>
           {MODELS.map((m, i) => (
@@ -57,31 +66,39 @@ export default function App() {
           ))}
         </div>
 
-        {/* Rig visualization */}
-        <div style={sectionStyle}>
-          <label style={labelStyle}>Rig</label>
-          <button
-            onClick={() => setShowSkeleton((v) => !v)}
-            style={showSkeleton ? btnActiveStyle : btnStyle}
-          >
-            {showSkeleton ? '🦴 Hide Skeleton' : '🦴 Show Skeleton'}
-          </button>
-        </div>
+        <ChatPanel
+          speak={tts.speak}
+          stopTts={tts.stop}
+          speaking={tts.speaking}
+          onGesture={gesture.triggerGesture}
+        />
 
-        {/* Lip-sync mic toggle */}
         <div style={sectionStyle}>
-          <label style={labelStyle}>Lip Sync</label>
-          <button
-            onClick={toggleMic}
-            style={micActive ? btnActiveStyle : btnStyle}
-          >
+          <label style={labelStyle}>User Mic Lip-Sync (HeadAudio)</label>
+          <button onClick={toggleMic} style={micActive ? btnActiveStyle : btnStyle}>
             {micActive ? '🎤 Mic On' : '🎤 Enable Mic'}
           </button>
         </div>
 
-        {/* Animation panel */}
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Gestures (current: {gesture.currentGesture || 'none'})</label>
+          <button
+            onClick={() => setChatGesturesEnabled((v) => !v)}
+            style={chatGesturesEnabled ? btnActiveStyle : btnStyle}
+          >
+            {chatGesturesEnabled ? 'Auto gestures: ON' : 'Auto gestures: OFF'}
+          </button>
+        </div>
+
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Rig</label>
+          <button onClick={() => setShowSkeleton((v) => !v)} style={showSkeleton ? btnActiveStyle : btnStyle}>
+            {showSkeleton ? '🦴 Hide Skeleton' : '🦴 Show Skeleton'}
+          </button>
+        </div>
+
         <AnimationPanel
-          animations={ANIMATIONS}
+          animations={ANIMATION_PICKER}
           selectedAnim={selectedAnim}
           onSelectAnim={setSelectedAnim}
           builtInAnims={animationNames}
@@ -89,7 +106,6 @@ export default function App() {
           onPlayBuiltIn={setPlayingBuiltIn}
         />
 
-        {/* Blendshape panel */}
         <BlendShapePanel
           shapes={availableShapes}
           values={blendShapes}
@@ -97,7 +113,6 @@ export default function App() {
         />
       </div>
 
-      {/* 3D viewport */}
       <div style={{ flex: 1, position: 'relative' }}>
         <Canvas
           camera={{ position: [0, 1, 3], fov: 45 }}
@@ -111,7 +126,9 @@ export default function App() {
             <ModelViewer
               modelUrl={MODELS[selectedModel].url}
               modelScale={MODELS[selectedModel].scale}
-              animationUrl={selectedAnim >= 0 ? ANIMATIONS[selectedAnim].url : null}
+              animationUrl={activeAnimationUrl}
+              animationLoopOnce={activeLoopOnce}
+              onAnimationFinished={gesture.handleFinished}
               blendShapes={mergedBlendShapes}
               onShapesDetected={setAvailableShapes}
               onAnimationsDetected={setAnimationNames}
@@ -128,7 +145,7 @@ export default function App() {
 }
 
 const sidebarStyle = {
-  width: 280,
+  width: 320,
   background: '#12121a',
   color: '#eee',
   padding: 16,
@@ -136,9 +153,7 @@ const sidebarStyle = {
   borderRight: '1px solid #333',
 };
 
-const sectionStyle = {
-  marginBottom: 16,
-};
+const sectionStyle = { marginBottom: 16 };
 
 const labelStyle = {
   display: 'block',

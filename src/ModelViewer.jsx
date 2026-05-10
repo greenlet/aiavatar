@@ -28,6 +28,8 @@ function ModelScene({
   modelUrl,
   modelScale,
   animationUrl,
+  animationLoopOnce = false,
+  onAnimationFinished,
   blendShapes,
   onShapesDetected,
   onAnimationsDetected,
@@ -56,7 +58,15 @@ function ModelScene({
     return [...(animations || []), ...externalClips];
   }, [animations, externalClips]);
 
-  const { actions } = useAnimations(allClips, group);
+  const { actions, mixer } = useAnimations(allClips, group);
+
+  // Forward AnimationMixer "finished" events to caller so it can swap to idle.
+  useEffect(() => {
+    if (!mixer || !onAnimationFinished) return;
+    const cb = (e) => onAnimationFinished(e.action?.getClip()?.name);
+    mixer.addEventListener('finished', cb);
+    return () => mixer.removeEventListener('finished', cb);
+  }, [mixer, onAnimationFinished]);
 
   // Report built-in animation names
   useEffect(() => {
@@ -82,15 +92,27 @@ function ModelScene({
   useEffect(() => {
     Object.values(actions).forEach((a) => a?.stop());
 
+    const configure = (action) => {
+      if (!action) return null;
+      if (animationLoopOnce) {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      } else {
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.clampWhenFinished = false;
+      }
+      return action;
+    };
+
     if (playingBuiltIn) {
-      const action = actions[playingBuiltIn];
+      const action = configure(actions[playingBuiltIn]);
       if (action) action.reset().fadeIn(0.3).play();
     } else if (externalClips.length > 0) {
       const clipName = externalClips[0].name;
-      const action = actions[clipName];
+      const action = configure(actions[clipName]);
       if (action) action.reset().fadeIn(0.3).play();
     }
-  }, [playingBuiltIn, actions, externalClips]);
+  }, [playingBuiltIn, actions, externalClips, animationLoopOnce]);
 
   // Apply blendshape values
   useFrame(() => {

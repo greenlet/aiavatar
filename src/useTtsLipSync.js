@@ -132,14 +132,26 @@ export function useTtsLipSync({ voice = 'en-US-JennyNeural' } = {}) {
       });
     };
 
-    // Word boundaries → fire any gesture whose anchor falls within this word.
-    const pendingGestures = [...(job.gestures || [])];
+    // Word boundaries → fire any cue whose anchor falls within this word.
+    // `cues` is the new shape ({kind,name,atIndex}); `gestures` is legacy
+    // (gesture-only). Either may be present; merge and sort by atIndex.
+    const pendingCues = [
+      ...(job.cues || []),
+      ...((job.gestures || []).map((g) => ({ kind: 'gesture', name: g.name, atIndex: g.atIndex }))),
+    ].sort((a, b) => a.atIndex - b.atIndex);
+
+    const fireCue = (c) => {
+      try {
+        if (job.onCue) job.onCue(c.kind, c.name);
+        else if (c.kind === 'gesture') job.onGesture?.(c.name);
+      } catch (err) { console.error(err); }
+    };
+
     synthesizer.wordBoundary = (_s, e) => {
       // e.textOffset is the char offset in the text we passed in.
       const wordEnd = e.textOffset + (e.wordLength || 0);
-      while (pendingGestures.length && pendingGestures[0].atIndex <= wordEnd) {
-        const g = pendingGestures.shift();
-        try { job.onGesture?.(g.name); } catch (err) { console.error(err); }
+      while (pendingCues.length && pendingCues[0].atIndex <= wordEnd) {
+        fireCue(pendingCues.shift());
       }
     };
 
@@ -153,11 +165,8 @@ export function useTtsLipSync({ voice = 'en-US-JennyNeural' } = {}) {
         // console.log('Utterance finished. done =', done);
         if (done) return;
         done = true;
-        // Drain any gestures whose anchor was past the last word boundary.
-        while (pendingGestures.length) {
-          const g = pendingGestures.shift();
-          try { job.onGesture?.(g.name); } catch (err) { console.error(err); }
-        }
+        // Drain any cues whose anchor was past the last word boundary.
+        while (pendingCues.length) fireCue(pendingCues.shift());
         try { synthesizer.close(); } catch { /* noop */ }
         resolve();
       };
@@ -217,10 +226,11 @@ export function useTtsLipSync({ voice = 'en-US-JennyNeural' } = {}) {
   }, [runOne, stopTickLoop]);
 
   // ---- public API ---------------------------------------------------------
-  const speak = useCallback((text, { gestures = [], onGesture } = {}) => {
+  const speak = useCallback((text, opts = {}) => {
     if (!text || !text.trim()) return Promise.resolve();
+    const { gestures = [], onGesture, cues = [], onCue } = opts;
     return new Promise((resolve) => {
-      queueRef.current.push({ text, gestures, onGesture, resolve });
+      queueRef.current.push({ text, gestures, onGesture, cues, onCue, resolve });
       drain();
     });
   }, [drain]);

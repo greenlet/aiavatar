@@ -10,6 +10,16 @@ export const ANIMATIONS = [
   { name: 'talking_seated', url: '/animations/talking_seated.glb' },
   { name: 'thinking',       url: '/animations/thinking.glb' },
   { name: 'waving',         url: '/animations/waving.glb' },
+  { name: 'shrug',          url: '/animations/shrug.glb' },
+  { name: 'pointing',       url: '/animations/pointing.glb' },
+  { name: 'clapping',       url: '/animations/clapping.glb' },
+  { name: 'agreeing',       url: '/animations/agreeing.glb' },
+  { name: 'disappointed',   url: '/animations/disappointed.glb' },
+  { name: 'excited',        url: '/animations/excited.glb' },
+  { name: 'thankful',       url: '/animations/thankful.glb' },
+  { name: 'salute',         url: '/animations/salute.glb' },
+  { name: 'weight_shift',   url: '/animations/weight_shift.glb' },
+  { name: 'talking',        url: '/animations/talking.glb' },
 ];
 
 export const ANIMATION_BY_NAME = Object.fromEntries(
@@ -26,4 +36,14 @@ export const ANIMATION_LABELS = {
   talking_seated: 'Talking Seated',
   thinking:       'Thinking',
   waving:         'Waving',
+  shrug:          'Shrug',
+  pointing:       'Pointing',
+  clapping:       'Clapping',
+  agreeing:       'Agreeing',
+  disappointed:   'Disappointed',
+  excited:        'Excited',
+  thankful:       'Thankful',
+  salute:         'Salute',
+  weight_shift:   'Weight Shift',
+  talking:        'Talking',
 };

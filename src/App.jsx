@@ -8,7 +8,9 @@ import ChatPanel from './ChatPanel';
 import { useLipSync } from './useLipSync';
 import { useTtsLipSync } from './useTtsLipSync';
 import { useGestureController } from './avatar/useGestureController';
+import { useExpressionController } from './avatar/useExpressionController';
 import { ANIMATIONS, ANIMATION_LABELS } from './animations';
+import { EXPRESSION_NAMES, EXPRESSION_LABELS } from './avatar/expressions';
 
 const MODELS = [
   { name: 'Jake (v03)', url: '/v03/model.glb', scale: 1 },
@@ -32,16 +34,19 @@ export default function App() {
   const [playingBuiltIn, setPlayingBuiltIn] = useState(null);
   const [showSkeleton, setShowSkeleton] = useState(false);
   const [chatGesturesEnabled, setChatGesturesEnabled] = useState(true);
+  const [gazeAtCamera, setGazeAtCamera] = useState(true);
 
   const { micActive, toggleMic, visemeValues: micVisemes } = useLipSync();
   const tts = useTtsLipSync({ voice: 'en-US-JennyNeural' });
   const gesture = useGestureController({ enabled: chatGesturesEnabled });
+  const expression = useExpressionController({ enabled: chatGesturesEnabled });
 
-  // While TTS is speaking, its visemes take precedence over mic-driven ones.
+  // Merge order matters — visemes (lip-sync) win over expression for any
+  // mouth shape they both touch, while expression colors brows/eyes/cheeks.
   const mergedBlendShapes = useMemo(() => {
     const baseVisemes = tts.speaking ? tts.visemeValues : micVisemes;
-    return { ...blendShapes, ...baseVisemes };
-  }, [blendShapes, micVisemes, tts.speaking, tts.visemeValues]);
+    return { ...blendShapes, ...expression.expressionShapes, ...baseVisemes };
+  }, [blendShapes, micVisemes, tts.speaking, tts.visemeValues, expression.expressionShapes]);
 
   // Manual animation picker overrides chat-driven gestures while selected.
   const manualAnim = selectedAnim >= 0 ? ANIMATION_PICKER[selectedAnim] : null;
@@ -71,6 +76,7 @@ export default function App() {
           stopTts={tts.stop}
           speaking={tts.speaking}
           onGesture={gesture.triggerGesture}
+          onExpression={expression.triggerExpression}
         />
 
         <div style={sectionStyle}>
@@ -88,6 +94,37 @@ export default function App() {
           >
             {chatGesturesEnabled ? 'Auto gestures: ON' : 'Auto gestures: OFF'}
           </button>
+        </div>
+
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Gaze (looks at viewer)</label>
+          <button
+            onClick={() => setGazeAtCamera((v) => !v)}
+            style={gazeAtCamera ? btnActiveStyle : btnStyle}
+          >
+            {gazeAtCamera ? '👀 Stare at me: ON' : '👀 Stare at me: OFF'}
+          </button>
+        </div>
+
+        <div style={sectionStyle}>
+          <label style={labelStyle}>
+            Facial Expression (current: {expression.currentExpression})
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {EXPRESSION_NAMES.map((name) => (
+              <button
+                key={name}
+                onClick={() => expression.triggerExpression(name, { holdMs: 4000 })}
+                style={{
+                  ...exprBtnStyle,
+                  ...(expression.currentExpression === name ? exprBtnActiveStyle : null),
+                }}
+                title={`Trigger ${name}`}
+              >
+                {EXPRESSION_LABELS[name] || name}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div style={sectionStyle}>
@@ -134,6 +171,7 @@ export default function App() {
               onAnimationsDetected={setAnimationNames}
               playingBuiltIn={playingBuiltIn}
               showSkeleton={showSkeleton}
+              gazeAtCamera={gazeAtCamera}
             />
           </Suspense>
           <OrbitControls target={[0, 1, 0]} />
@@ -183,4 +221,22 @@ const btnActiveStyle = {
   background: '#2563eb',
   color: '#fff',
   borderColor: '#3b82f6',
+};
+
+const exprBtnStyle = {
+  flex: '0 0 auto',
+  padding: '4px 8px',
+  background: '#1d1d2a',
+  color: '#ccc',
+  border: '1px solid #333',
+  borderRadius: 12,
+  cursor: 'pointer',
+  fontSize: 11,
+  lineHeight: 1.2,
+};
+
+const exprBtnActiveStyle = {
+  background: '#a855f7',
+  color: '#fff',
+  borderColor: '#c084fc',
 };

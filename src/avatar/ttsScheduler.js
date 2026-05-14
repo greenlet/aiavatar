@@ -1,24 +1,37 @@
 /**
  * Buffers streaming text into sentence-sized utterances and forwards them
- * to a TTS `speak(text, { gestures, onGesture })` function. Re-anchors
- * gesture char-offsets so each utterance gets only its own gestures with
- * indices relative to that utterance's text.
+ * to a TTS `speak(text, { cues, onCue })` function. Re-anchors cue
+ * char-offsets so each utterance gets only its own cues with indices
+ * relative to that utterance's text.
  *
- *   const sched = createTtsScheduler({ speak, onGesture });
- *   sched.feed(cleanText, gestures);   // many times
- *   sched.flush();                      // once at end of stream
+ * Each cue has shape { kind: 'gesture' | 'expression', name, atIndex }.
+ *
+ *   const sched = createTtsScheduler({ speak, onCue });
+ *   sched.feed(cleanText, cues);   // many times
+ *   sched.flush();                  // once at end of stream
  */
 
 const SENTENCE_END = /([.!?]+)(\s+|$)/g;
 const MAX_PENDING = 240; // chars — flush even mid-sentence past this length
 
-export function createTtsScheduler({ speak, onGesture }) {
+export function createTtsScheduler({ speak, onCue, onGesture }) {
   let buffer = '';
-  let pendingGestures = []; // {name, atIndex} indices into `buffer`
+  let pendingCues = []; // {kind, name, atIndex} indices into `buffer`
 
-  const emit = (text, gestures) => {
+  // Back-compat: route to onGesture for gesture-kind cues if onCue not given.
+  const dispatch = onCue
+    ? (kind, name) => onCue(kind, name)
+    : (kind, name) => { if (kind === 'gesture') onGesture?.(name); };
+
+  const emit = (text, cues) => {
     if (!text.trim()) return;
-    speak(text, { gestures, onGesture });
+    speak(text, {
+      cues,
+      onCue: dispatch,
+      // Back-compat keys for older speak() implementations.
+      gestures: cues.filter((c) => c.kind === 'gesture'),
+      onGesture: (name) => dispatch('gesture', name),
+    });
   };
 
   const drain = (force) => {
@@ -37,28 +50,31 @@ export function createTtsScheduler({ speak, onGesture }) {
       const text = buffer.slice(0, cut);
       const here = [];
       const rest = [];
-      for (const g of pendingGestures) {
-        if (g.atIndex <= cut) here.push({ name: g.name, atIndex: g.atIndex });
-        else rest.push({ name: g.name, atIndex: g.atIndex - cut });
+      for (const c of pendingCues) {
+        if (c.atIndex <= cut) here.push({ kind: c.kind, name: c.name, atIndex: c.atIndex });
+        else rest.push({ kind: c.kind, name: c.name, atIndex: c.atIndex - cut });
       }
       emit(text, here);
       const tail = buffer.slice(cut);
       const trimmed = tail.replace(/^\s+/, '');
       const stripped = tail.length - trimmed.length;
       buffer = trimmed;
-      pendingGestures = rest.map((g) => ({
-        name: g.name,
-        atIndex: Math.max(0, g.atIndex - stripped),
+      pendingCues = rest.map((c) => ({
+        kind: c.kind,
+        name: c.name,
+        atIndex: Math.max(0, c.atIndex - stripped),
       }));
     }
   };
 
   return {
-    feed(deltaText, gestures = []) {
+    feed(deltaText, cues = []) {
       const base = buffer.length;
       buffer += deltaText;
-      for (const g of gestures) {
-        pendingGestures.push({ name: g.name, atIndex: base + g.atIndex });
+      for (const c of cues) {
+        // Accept either {kind,name,atIndex} or legacy {name,atIndex} (gesture).
+        const kind = c.kind || 'gesture';
+        pendingCues.push({ kind, name: c.name, atIndex: base + c.atIndex });
       }
       drain(false);
     },

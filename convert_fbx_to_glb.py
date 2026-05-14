@@ -17,6 +17,17 @@ conversions = [
     ("models/animations/talking_seated.fbx", "models/animations/talking_seated.glb"),
     ("models/animations/thinking.fbx", "models/animations/thinking.glb"),
     ("models/animations/waving.fbx", "models/animations/waving.glb"),
+    # New conversational gestures (May 2026)
+    ("models/animations/shrug.fbx", "models/animations/shrug.glb"),
+    ("models/animations/pointing.fbx", "models/animations/pointing.glb"),
+    ("models/animations/clapping.fbx", "models/animations/clapping.glb"),
+    ("models/animations/agreeing.fbx", "models/animations/agreeing.glb"),
+    ("models/animations/disappointed.fbx", "models/animations/disappointed.glb"),
+    ("models/animations/excited.fbx", "models/animations/excited.glb"),
+    ("models/animations/thankful.fbx", "models/animations/thankful.glb"),
+    ("models/animations/salute.fbx", "models/animations/salute.glb"),
+    ("models/animations/weight_shift.fbx", "models/animations/weight_shift.glb"),
+    ("models/animations/talking.fbx", "models/animations/talking.glb"),
 ]
 
 for input_rel, output_rel in conversions:
@@ -25,6 +36,10 @@ for input_rel, output_rel in conversions:
 
     if not os.path.exists(input_path):
         print(f"SKIP (not found): {input_path}")
+        continue
+
+    if os.path.exists(output_path):
+        print(f"SKIP (already converted): {output_rel}")
         continue
 
     print(f"\nConverting: {input_rel} -> {output_rel}")

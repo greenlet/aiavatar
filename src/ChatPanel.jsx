@@ -1,19 +1,24 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { streamChat } from './api/chat';
-import { createGestureStreamParser } from './avatar/gestureParser';
+import { createCueStreamParser } from './avatar/gestureParser';
 import { createTtsScheduler } from './avatar/ttsScheduler';
 import { useSpeechRecognition } from './useSpeechRecognition';
 import { ANIMATIONS } from './animations';
+import { EXPRESSION_NAMES } from './avatar/expressions';
 
-const ALLOWED = new Set(ANIMATIONS.map((a) => a.name));
+const ALLOWED = {
+  gesture: new Set(ANIMATIONS.map((a) => a.name)),
+  expression: new Set(EXPRESSION_NAMES),
+};
 
 /**
  * Chatbot panel: text input + push-to-talk mic. Streams the LLM reply through
- * the gesture parser and forwards speakable chunks to the parent-provided
- * `speak(text, { gestures, onGesture })` from useTtsLipSync.
+ * the cue parser and forwards speakable chunks to the parent-provided
+ * `speak(text, { cues, onCue })` from useTtsLipSync.
  */
 export default function ChatPanel({
   onGesture,
+  onExpression,
   speak,
   stopTts,
   speaking,
@@ -40,19 +45,22 @@ export default function ChatPanel({
     setMessages([...newMessages, { role: 'assistant', content: '' }]);
     setBusy(true);
 
-    const parser = createGestureStreamParser(ALLOWED);
+    const parser = createCueStreamParser(ALLOWED);
     const scheduler = createTtsScheduler({
       speak,
-      onGesture: (name) => onGesture?.(name),
+      onCue: (kind, name) => {
+        if (kind === 'gesture') onGesture?.(name);
+        else if (kind === 'expression') onExpression?.(name);
+      },
     });
 
     abortRef.current = new AbortController();
     let assistantText = '';
     try {
       for await (const delta of streamChat(newMessages, { signal: abortRef.current.signal })) {
-        const { cleanText, gestures } = parser.feed(delta);
-        if (cleanText || gestures.length) {
-          scheduler.feed(cleanText, gestures);
+        const { cleanText, cues } = parser.feed(delta);
+        if (cleanText || cues.length) {
+          scheduler.feed(cleanText, cues);
           assistantText += cleanText;
           setMessages((prev) => {
             const next = [...prev];
@@ -62,8 +70,8 @@ export default function ChatPanel({
         }
       }
       const tail = parser.flush();
-      if (tail.cleanText || tail.gestures.length) {
-        scheduler.feed(tail.cleanText, tail.gestures);
+      if (tail.cleanText || tail.cues.length) {
+        scheduler.feed(tail.cleanText, tail.cues);
         assistantText += tail.cleanText;
         setMessages((prev) => {
           const next = [...prev];
@@ -79,7 +87,7 @@ export default function ChatPanel({
       setBusy(false);
       abortRef.current = null;
     }
-  }, [busy, messages, speak, onGesture]);
+  }, [busy, messages, speak, onGesture, onExpression]);
 
   const onSubmit = (e) => {
     e.preventDefault();

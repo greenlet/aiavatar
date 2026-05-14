@@ -1,79 +1,98 @@
 /**
- * Streaming-safe parser for inline [gesture:NAME] tags emitted by the LLM.
+ * Streaming-safe parser for inline cue tags emitted by the LLM.
  *
- * Returns { cleanText, gestures, residual } where:
- *   - cleanText: the input with all complete tags removed
- *   - gestures:  [{ name, atIndex }] anchored to positions in cleanText
- *                (atIndex is the char offset where the next word begins)
- *   - residual:  any trailing partial tag ("[gesture", "[ges", etc.) that
- *                must be prepended to the next chunk.
+ * Supports two cue kinds:
+ *   [gesture:NAME]     — full-body Mixamo animation
+ *   [expression:NAME]  — facial blendshape preset
  *
- * Names are validated against `allowed` (a Set or array). Unknown/malformed
- * tags are silently dropped, but their text is still removed if a `]` is
- * found, to keep them out of the spoken audio.
+ * Returns { cleanText, cues, gestures, residual } where:
+ *   - cleanText: input with all complete tags removed
+ *   - cues:      [{ kind, name, atIndex }] anchored to char offsets in cleanText
+ *   - gestures:  back-compat alias = cues filtered to kind === 'gesture'
+ *   - residual:  trailing partial tag deferred to next chunk
+ *
+ * Names are validated against `allowed`, which can be:
+ *   - a Set/array of gesture names                  (legacy)
+ *   - { gesture: Set|Array, expression: Set|Array } (preferred)
+ * Unknown/malformed tags are silently dropped (text removed if `]` is found).
  */
-const TAG_RE = /\[gesture:([a-z_]+)\]/g;
+const TAG_RE = /\[(gesture|expression):([a-z_]+)\]/g;
+const PREFIXES = ['[gesture:', '[expression:'];
+
+function normalizeAllowed(allowed) {
+  if (allowed instanceof Set || Array.isArray(allowed)) {
+    return { gesture: new Set(allowed), expression: new Set() };
+  }
+  const a = allowed || {};
+  return {
+    gesture: a.gesture instanceof Set ? a.gesture : new Set(a.gesture || []),
+    expression: a.expression instanceof Set ? a.expression : new Set(a.expression || []),
+  };
+}
 
 export function parseChunk(chunk, allowed) {
-  const allowedSet = allowed instanceof Set ? allowed : new Set(allowed);
+  const allow = normalizeAllowed(allowed);
 
   // Detect a possible partial tag at the end and split it off as residual.
-  // Heuristic: if the last '[' has no matching ']' after it AND the tail
-  // could be the start of "[gesture:..." then defer it.
   let residual = '';
   const lastOpen = chunk.lastIndexOf('[');
   if (lastOpen !== -1 && chunk.indexOf(']', lastOpen) === -1) {
     const tail = chunk.slice(lastOpen);
-    // Only buffer if it looks like the start of our tag prefix.
-    if ('[gesture:'.startsWith(tail) || tail.startsWith('[gesture:')) {
+    if (PREFIXES.some((p) => p.startsWith(tail) || tail.startsWith(p))) {
       residual = tail;
       chunk = chunk.slice(0, lastOpen);
     }
   }
 
-  const gestures = [];
+  const cues = [];
   let cleanText = '';
   let lastIndex = 0;
   let match;
   TAG_RE.lastIndex = 0;
   while ((match = TAG_RE.exec(chunk)) !== null) {
     cleanText += chunk.slice(lastIndex, match.index);
-    const name = match[1];
-    if (allowedSet.has(name)) {
-      // Anchor to the position in cleanText where text resumes (next word).
-      gestures.push({ name, atIndex: cleanText.length });
+    const kind = match[1];
+    const name = match[2];
+    if (allow[kind]?.has(name)) {
+      cues.push({ kind, name, atIndex: cleanText.length });
     }
     lastIndex = match.index + match[0].length;
   }
   cleanText += chunk.slice(lastIndex);
 
-  return { cleanText, gestures, residual };
+  const gestures = cues
+    .filter((c) => c.kind === 'gesture')
+    .map((c) => ({ name: c.name, atIndex: c.atIndex }));
+
+  return { cleanText, cues, gestures, residual };
 }
 
 /**
  * Stateful wrapper that handles split-chunk tags across an SSE stream.
  *
- *   const p = createGestureStreamParser(allowed);
+ *   const p = createCueStreamParser({ gesture, expression });
  *   for await (const delta of stream) {
- *     const { cleanText, gestures } = p.feed(delta);
+ *     const { cleanText, cues } = p.feed(delta);
  *     ...
  *   }
  *   const { cleanText } = p.flush();
  */
-export function createGestureStreamParser(allowed) {
+export function createCueStreamParser(allowed) {
   let buffer = '';
   return {
     feed(delta) {
       buffer += delta;
-      const { cleanText, gestures, residual } = parseChunk(buffer, allowed);
+      const { cleanText, cues, gestures, residual } = parseChunk(buffer, allowed);
       buffer = residual;
-      return { cleanText, gestures };
+      return { cleanText, cues, gestures };
     },
     flush() {
-      const { cleanText, gestures } = parseChunk(buffer, allowed);
+      const { cleanText, cues, gestures } = parseChunk(buffer, allowed);
       buffer = '';
-      // Any leftover residual that never closed is treated as plain text.
-      return { cleanText, gestures };
+      return { cleanText, cues, gestures };
     },
   };
 }
+
+// Back-compat alias — older callers expect `gestures` only.
+export const createGestureStreamParser = createCueStreamParser;

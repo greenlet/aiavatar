@@ -47,13 +47,28 @@ for input_rel, output_rel in conversions:
     # Clear scene
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # Import FBX
+    # Import FBX. `bake_space_transform=True` pre-applies the cm→m and
+    # Z-up→Y-up transforms during import so we don't end up with a
+    # rotated/scaled Armature root in the export. This matters for the
+    # post-April-2026 Mixamo exports which carry these conversions on
+    # the Armature node instead of baking them into bone data.
     bpy.ops.import_scene.fbx(
         filepath=input_path,
         use_anim=True,
         ignore_leaf_bones=False,
         automatic_bone_orientation=True,
+        bake_space_transform=True,
     )
+
+    # Apply any residual Object-level transforms on the Armature so the
+    # exported GLB has an identity scene root and bone rest poses live
+    # entirely in bone-local space (matches the April 2026 format).
+    for obj in bpy.data.objects:
+        if obj.type == 'ARMATURE':
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     # Export as GLB
     bpy.ops.export_scene.gltf(

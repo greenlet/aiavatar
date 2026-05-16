@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from openai import AsyncAzureOpenAI
 from pydantic import BaseModel, Field
 
@@ -118,3 +120,13 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# Serve the built Vite frontend (index.html + assets + flattened models/) from /.
+# Mount LAST so /api/* routes registered above always win over the static fallback.
+# In dev (no dist/ yet) we simply skip the mount; Vite serves the frontend on :3000.
+_DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
+if _DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_DIST_DIR, html=True), name="frontend")
+else:
+    logger.info("dist/ not found at %s; skipping static mount (dev mode)", _DIST_DIR)

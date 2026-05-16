@@ -2,17 +2,31 @@
  * Download Mixamo animations via Playwright.
  *
  * Usage:
- *   node download_mixamo.mjs
+ *   node skills/mixamo/download_mixamo.mjs           # auto: switch to Y-bot, then download
+ *   node skills/mixamo/download_mixamo.mjs --manual  # legacy: prompt for Enter, no auto-switch
  *
  * The browser stays open so you can log in manually. Once logged in,
  * press Enter in the terminal and the script will download each animation.
+ *
+ * IMPORTANT: For animations to be drop-in compatible with the existing
+ * retargeter, they MUST be downloaded against the default Y-bot (no
+ * uploaded character selected). The script auto-switches to Y-bot for
+ * you; pass `--manual` to skip that step.
+ *
+ * See skills/mixamo/SKILL.md for the full workflow (browser profile setup,
+ * conversion to GLB, and registry wiring).
  */
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 
-const DEST_DIR = path.join(import.meta.dirname, 'models', 'animations');
+// Resolve repo root from this script's location (skills/mixamo/)
+const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
+const DEST_DIR = path.join(REPO_ROOT, 'models', 'animations');
+const SCREENS_DIR = path.join(REPO_ROOT, 'screenshots', 'mixamo-debug');
+
+const MANUAL = process.argv.includes('--manual');
 
 // Animations to download — exact Mixamo animation name → local filename
 // Use the exact title shown under the thumbnail on mixamo.com
@@ -42,6 +56,143 @@ async function dismissCookieBanner(page) {
     console.log('  Dismissed cookie banner.');
     await page.waitForTimeout(1000);
   }
+}
+
+async function getActiveCharacterName(page) {
+  // Mixamo shows the currently-selected character's name in the header above
+  // the 3D preview, e.g. "CH31_NONPBR" or "Y BOT". Find a header-like text
+  // element on the right side (x > 700) near the top.
+  return await page.evaluate(() => {
+    const candidates = [];
+    document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div').forEach((el) => {
+      if (el.children.length > 0) return;
+      const text = (el.textContent || '').trim();
+      if (!text || text.length < 2 || text.length > 40) return;
+      const r = el.getBoundingClientRect();
+      if (r.left < 700 || r.left > 1100 || r.top > 90 || r.height < 10) return;
+      const fs = parseFloat(getComputedStyle(el).fontSize);
+      if (fs < 12) return;
+      candidates.push({ text, x: Math.round(r.left), y: Math.round(r.top), fs });
+    });
+    candidates.sort((a, b) => b.fs - a.fs);
+    return candidates[0]?.text || null;
+  });
+}
+
+async function switchToYBot(page) {
+  const before = await getActiveCharacterName(page);
+  console.log(`  Active character: ${before || '(unknown)'}`);
+  if (before && /^Y\s*BOT$/i.test(before)) {
+    console.log('  Already on Y Bot — skipping switch.');
+    return;
+  }
+
+  console.log('  Switching to Y Bot...');
+
+  // 1. Click "Characters" tab
+  const charsClicked = await page.evaluate(() => {
+    const els = document.querySelectorAll('a, button');
+    for (const el of els) {
+      const t = (el.textContent || '').trim();
+      const r = el.getBoundingClientRect();
+      if (t === 'Characters' && r.top < 100 && r.height > 0) {
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (!charsClicked) throw new Error('Could not click Characters tab');
+  await page.waitForTimeout(2000);
+
+  // 2. Search for "Y Bot"
+  const searchInput = page.locator('input[type="search"]').first();
+  await searchInput.click();
+  await searchInput.fill('Y Bot');
+  await searchInput.press('Enter');
+  await page.waitForTimeout(2500);
+
+  await page.screenshot({ path: path.join(SCREENS_DIR, 'characters-search.png') }).catch(() => {});
+
+  // 3. Click the Y Bot card (label exactly "Y Bot")
+  const cardClicked = await page.evaluate(() => {
+    const labels = document.querySelectorAll('p, span, div');
+    for (const el of labels) {
+      if (el.children.length > 0) continue;
+      const t = (el.textContent || '').trim();
+      if (!/^Y\s*Bot$/i.test(t)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.left >= 640 || r.top < 80) continue;
+      // Walk up to a clickable card container
+      let card = el.parentElement;
+      for (let i = 0; i < 6 && card; i++) {
+        const cr = card.getBoundingClientRect();
+        if (cr.width > 100 && cr.height > 100) {
+          card.click();
+          return t;
+        }
+        card = card.parentElement;
+      }
+      el.click();
+      return t + ' (label)';
+    }
+    return null;
+  });
+  if (!cardClicked) {
+    await page.screenshot({ path: path.join(SCREENS_DIR, 'characters-no-ybot.png') }).catch(() => {});
+    throw new Error('Could not find Y Bot card after search');
+  }
+  console.log(`  Clicked card: ${cardClicked}`);
+  await page.waitForTimeout(2000);
+
+  // 4. A confirmation modal appears: "Proceed with this new character?".
+  //    Click "USE THIS CHARACTER" to confirm. The modal is suppressed on
+  //    subsequent switches if the user previously checked "Do not show
+  //    this warning next time", so this step is optional.
+  const confirmed = await page.evaluate(() => {
+    const els = document.querySelectorAll('a, button');
+    for (const el of els) {
+      const t = (el.textContent || '').trim().toUpperCase();
+      if (t === 'USE THIS CHARACTER') {
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (confirmed) {
+    console.log('  Confirmed character switch via modal.');
+    await page.waitForTimeout(3000);
+  } else {
+    console.log('  No confirm modal (already dismissed for this session).');
+    await page.waitForTimeout(1500);
+  }
+
+  // 5. Verify the active character changed (best-effort; the header
+  //    detector is heuristic — fall back to a screenshot for inspection).
+  const after = await getActiveCharacterName(page);
+  console.log(`  Active character after switch: ${after || '(could not detect, see screenshot)'}`);
+  await page.screenshot({ path: path.join(SCREENS_DIR, 'after-switch.png') }).catch(() => {});
+  if (after && !/Y\s*BOT/i.test(after)) {
+    throw new Error(`Character switch did not take effect (still "${after}")`);
+  }
+
+  // 6. Go back to Animations tab
+  const animsClicked = await page.evaluate(() => {
+    const els = document.querySelectorAll('a, button');
+    for (const el of els) {
+      const t = (el.textContent || '').trim();
+      const r = el.getBoundingClientRect();
+      if (t === 'Animations' && r.top < 100 && r.height > 0) {
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (!animsClicked) throw new Error('Could not click Animations tab');
+  await page.waitForTimeout(2500);
+  console.log('  Returned to Animations tab.');
 }
 
 async function searchAnimation(page, searchTerm) {
@@ -214,7 +365,7 @@ async function downloadAnimation(page, destPath) {
   page.off('response', responseHandler);
 
   if (!downloadUrl) {
-    await page.screenshot({ path: path.join(DEST_DIR, `_debug_${path.basename(destPath, '.fbx')}.png`) });
+    await page.screenshot({ path: path.join(SCREENS_DIR, `_debug_${path.basename(destPath, '.fbx')}.png`) });
     throw new Error('No export URL captured');
   }
 
@@ -239,6 +390,7 @@ async function downloadAnimation(page, destPath) {
 
 (async () => {
   fs.mkdirSync(DEST_DIR, { recursive: true });
+  fs.mkdirSync(SCREENS_DIR, { recursive: true });
 
   console.log('Launching browser with your Chrome profile (make sure Chrome is fully closed)...');
   const userDataDir = '/tmp/chrome-mixamo';
@@ -254,14 +406,27 @@ async function downloadAnimation(page, destPath) {
   await page.goto('https://www.mixamo.com/#/', { waitUntil: 'domcontentloaded' });
   console.log('Waiting for Mixamo to load (should be already logged in)...');
   await page.waitForTimeout(4000);
-  console.log('Press Enter when the animation library is visible.\n');
-  await askUser('Press Enter when ready...');
-
-  console.log('Checking Mixamo is ready...');
-  await page.waitForTimeout(2000);
 
   // Dismiss cookie consent banner if present
   await dismissCookieBanner(page);
+
+  if (MANUAL) {
+    console.log('Press Enter when the animation library is visible.\n');
+    await askUser('Press Enter when ready...');
+  } else {
+    // Auto-switch to Y Bot so downloaded animations get the canonical
+    // mixamorig: bone prefix and identity rest pose.
+    try {
+      await switchToYBot(page);
+    } catch (err) {
+      console.error(`  ✗ Y-bot switch failed: ${err.message}`);
+      console.error('  Re-run with --manual and switch character yourself.');
+      throw err;
+    }
+  }
+
+  console.log('Checking Mixamo is ready...');
+  await page.waitForTimeout(2000);
 
   // Log page structure for debugging
   const pageInfo = await page.evaluate(() => {
@@ -290,7 +455,7 @@ async function downloadAnimation(page, destPath) {
       await downloadAnimation(page, destPath);
     } catch (err) {
       console.error(`  ✗ FAILED: ${anim.name} — ${err.message}`);
-      await page.screenshot({ path: path.join(DEST_DIR, `error_${anim.name}.png`) });
+      await page.screenshot({ path: path.join(SCREENS_DIR, `error_${anim.name}.png`) });
       console.log(`  Screenshot saved: error_${anim.name}.png`);
       
       // Press Escape to dismiss any dialogs

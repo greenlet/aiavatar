@@ -1,0 +1,62 @@
+# VCS
+.git
+.gitignore
+.github
+
+# Local secrets / env
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules
+dist
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Artifacts that should never enter the image
+screenshots
+*.zip
+source.zip
+
+# Mixamo / asset sources (raw FBX) — only converted GLBs are needed
+*.fbx
+models/animations/*.fbx
+skills/mixamo/
+
+# Azure tooling state
+.azure
+infra
+azure.yaml
+
+# Misc dev scripts not needed at runtime
+debug_bones.js
+debug_inspect.js
+debug_restposes.js
+inspect_transforms.js
+take_screenshots.js
+download_mixamo.mjs
+convert_fbx_to_glb.py
+convert_fbx_to_glb.mjs
+
+# Docs
+docs
+Readme.md
+
+# Python dev requirements (we use requirements-runtime.txt in image)
+requirements.txt

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "${AZURE_ENV_NAME}" },
+    "location":        { "value": "${AZURE_LOCATION}" },
+
+    "azureOpenAiEndpoint":   { "value": "${AZURE_OPENAI_ENDPOINT}" },
+    "azureOpenAiApiKey":     { "value": "${AZURE_OPENAI_API_KEY}" },
+    "azureOpenAiDeployment": { "value": "${AZURE_OPENAI_DEPLOYMENT=gpt-5.4}" },
+    "azureOpenAiApiVersion": { "value": "${AZURE_OPENAI_API_VERSION=2024-12-01-preview}" },
+
+    "azureSpeechKey":    { "value": "${AZURE_SPEECH_KEY}" },
+    "azureSpeechRegion": { "value": "${AZURE_SPEECH_REGION=westeurope}" },
+
+    "allowedOrigin": { "value": "${ALLOWED_ORIGIN=*}" },
+    "imageTag":      { "value": "${IMAGE_TAG=latest}" }
+  }
+}
